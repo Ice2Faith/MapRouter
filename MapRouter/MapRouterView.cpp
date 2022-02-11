@@ -17,6 +17,11 @@
 #define new DEBUG_NEW
 #endif
 
+double getDistance(double x1, double y1, double x2, double y2)
+{
+	return sqrt(pow(x2 - x1, 2.0) + pow(y2 - y1, 2.0));
+}
+
 
 // CMapRouterView
 
@@ -51,6 +56,10 @@ BEGIN_MESSAGE_MAP(CMapRouterView, CView)
 	ON_COMMAND(ID_EDIT_NONE, &CMapRouterView::OnEditNone)
 	ON_COMMAND(ID_SWITCH_BGIMG_SHOW, &CMapRouterView::OnSwitchBgimgShow)
 	ON_COMMAND(ID_SWITCH_THEME_COLOR, &CMapRouterView::OnSwitchThemeColor)
+	ON_COMMAND(ID_SWITCH_EDGE_DIRECT_DBL, &CMapRouterView::OnSwitchEdgeDirectDbl)
+	ON_COMMAND(ID_SWITCH_POINT_DISTANCE_AS_WEIGHT, &CMapRouterView::OnSwitchPointDistanceAsWeight)
+	ON_COMMAND(ID_SWITCH_FULL_PRIOR_WEIGHT, &CMapRouterView::OnSwitchFullPriorWeight)
+	ON_COMMAND(ID_SWITCH_SHOW_WEIGHT, &CMapRouterView::OnSwitchShowWeight)
 END_MESSAGE_MAP()
 
 // CMapRouterView 构造/析构
@@ -67,6 +76,10 @@ CMapRouterView::CMapRouterView()
 	this->mostDisplayCount = 1;
 	this->isShowBgImg = true;
 	this->isBlackPanel = false;
+	this->isEdgeDirectDbl = false;
+	this->isPointDistanceAsEdgeWeight = false;
+	this->isFullWeightPrior = true;
+	this->isShowWeight = false;
 	this->operType = OT_NULL;
 	this->map.clean();
 	srand((unsigned int)time(NULL));
@@ -227,6 +240,14 @@ void CMapRouterView::drawMapContent(CDC * pDC)
 			pDC->LineTo(pe.x, pe.y);
 			pDC->Rectangle(pe.x - 2, pe.y - 2, pe.x + 2, pe.y + 2);*/
 			drawArrow(pDC, ps.x, ps.y, pe.x, pe.y);
+
+			if (isPointDistanceAsEdgeWeight || isShowWeight){
+				if (isShowWeight){
+					CString ostr;
+					ostr.Format(TEXT("%.3lf"), e.weight);
+					pDC->TextOutW((ps.x + pe.x) / 2, (ps.y + pe.y) / 2, ostr);
+				}
+			}
 		}
 		pDC->SelectObject(oldPen);
 	}
@@ -271,6 +292,18 @@ void CMapRouterView::drawMapContent(CDC * pDC)
 		CString str;
 		str.Format(TEXT("共%d条路径被找到:\n"),count);
 		str += routesStrs;
+		if (isPointDistanceAsEdgeWeight){
+			str = str + TEXT("使用点距离作为权重状态：启用\n");
+		}
+		else{
+			str = str + TEXT("使用点距离作为权重状态：禁用\n");
+		}
+		if (isFullWeightPrior){
+			str = str + TEXT("全局最小权重优先：启用\n");
+		}
+		else{
+			str = str + TEXT("全局最小权重优先：禁用\n");
+		}
 		//pDC->TextOutW(0, 0, str);
 		RECT rect;
 		rect.left = 0;
@@ -337,10 +370,7 @@ int CMapRouterView::findPointIdx(double x, double y, double radius)
 	return -1;
 }
 
-double CMapRouterView::getDistance(double x1, double y1, double x2, double y2)
-{
-	return sqrt(pow(x2 - x1, 2.0) + pow(y2 - y1, 2.0));
-}
+
 
 void CMapRouterView::OnLButtonDown(UINT nFlags, CPoint point)
 {
@@ -369,10 +399,10 @@ void CMapRouterView::OnLButtonUp(UINT nFlags, CPoint point)
 						 int sidx = findPointIdx(beginPoint.x, beginPoint.y, recogRadius);
 						 int eidx = findPointIdx(point.x, point.y, recogRadius);
 						 if (sidx >= 0 && eidx >= 0 && sidx != eidx){
-							 MapEdge e = { 0 };
-							 e.sidx = sidx;
-							 e.eidx = eidx;
-							 this->map.edges.push_back(e);
+							 this->map.addEdge(sidx, eidx);
+							 if (isEdgeDirectDbl){
+								 this->map.addEdge(eidx, sidx);
+							 }
 						 }
 	}
 		break;
@@ -477,6 +507,9 @@ void CMapRouterView::OnRButtonUp(UINT nFlags, CPoint point)
 						 int eidx = findPointIdx(point.x, point.y, recogRadius);
 						 if (sidx >= 0 && eidx >= 0 && sidx != eidx){
 							 this->map.removeEdge(sidx, eidx);
+							 if (isEdgeDirectDbl){
+								 this->map.removeEdge(eidx, sidx);
+							 }
 							 this->routes.clear();
 						 }
 	}
@@ -531,7 +564,14 @@ void CMapRouterView::OnRunRoute()
 {
 	// TODO:  在此添加命令处理程序代码
 	MapRouter router;
-	routes=router.routeMap(map, beginIdx, endIdx);
+	if (isPointDistanceAsEdgeWeight){
+		map.setWeightsByDistance(false);
+	}
+	else{
+		map.setWeightsByDistance(true);
+	}
+	
+	routes = router.routeMap(map, beginIdx, endIdx, isPointDistanceAsEdgeWeight, isFullWeightPrior);
 	this->Invalidate();
 }
 
@@ -545,7 +585,9 @@ void CMapRouterView::OnFileOpen()
 	{
 		gReadFilePathName = fileDlg.GetPathName();//得到完整的文件名及路径
 		CString filename = fileDlg.GetFileName();//仅文件名
-		loadimage(&bgImg, gReadFilePathName);
+		IMAGE pimg;
+		loadimage(&pimg, gReadFilePathName);
+		bgImg = pimg;
 		this->Invalidate();
 	}
 }
@@ -635,5 +677,39 @@ void CMapRouterView::OnSwitchThemeColor()
 {
 	// TODO:  在此添加命令处理程序代码
 	isBlackPanel = !isBlackPanel;
+	this->Invalidate();
+}
+
+
+void CMapRouterView::OnSwitchEdgeDirectDbl()
+{
+	// TODO:  在此添加命令处理程序代码
+	isEdgeDirectDbl = !isEdgeDirectDbl;
+}
+
+
+void CMapRouterView::OnSwitchPointDistanceAsWeight()
+{
+	// TODO:  在此添加命令处理程序代码
+	isPointDistanceAsEdgeWeight = !isPointDistanceAsEdgeWeight;
+	if (isPointDistanceAsEdgeWeight){
+		map.setWeightsByDistance(false);
+	}
+	this->OnRunRoute();
+}
+
+
+void CMapRouterView::OnSwitchFullPriorWeight()
+{
+	// TODO:  在此添加命令处理程序代码
+	isFullWeightPrior = !isFullWeightPrior;
+	this->OnRunRoute();
+}
+
+
+void CMapRouterView::OnSwitchShowWeight()
+{
+	// TODO:  在此添加命令处理程序代码
+	isShowWeight = !isShowWeight;
 	this->Invalidate();
 }

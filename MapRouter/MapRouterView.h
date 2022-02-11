@@ -9,6 +9,8 @@
 #include<stdlib.h>
 #include<time.h>
 
+double getDistance(double x1, double y1, double x2, double y2);
+
 typedef struct _map_point{
 	double x; // X 坐标
 	double y; // Y 坐标
@@ -147,6 +149,21 @@ public:
 		}
 		this->edges = data;
 	}
+	int findEdge(int sidx, int eidx){
+		if (sidx < 0 || eidx < 0){
+			return -1;
+		}
+		if (sidx >= points.size() || eidx >= points.size()){
+			return -1;
+		}
+		for (int i = 0; i < edges.size(); i++){
+			MapEdge e = edges.at(i);
+			if (e.sidx == sidx && e.eidx == eidx){
+				return i;
+			}
+		}
+		return -1;
+	}
 	void removeEdge(int sidx, int eidx){
 		if (sidx < 0 || eidx < 0){
 			return;
@@ -159,6 +176,42 @@ public:
 			if (e.sidx == sidx && e.eidx == eidx){
 				edges.erase(edges.begin()+i);
 				break;
+			}
+		}
+	}
+	void addEdge(int sidx, int eidx){
+		if (sidx < 0 || eidx < 0){
+			return;
+		}
+		if (sidx >= points.size() || eidx >= points.size()){
+			return;
+		}
+		bool isIn = false;
+		for (int i = 0; i < edges.size(); i++){
+			MapEdge e = edges.at(i);
+			if (e.sidx == sidx && e.eidx == eidx){
+				isIn = true;
+				break;
+			}
+		}
+		if (!isIn){
+			MapEdge e = { 0 };
+			e.sidx = sidx;
+			e.eidx = eidx;
+			edges.push_back(e);
+		}
+	}
+	void setWeightsByDistance(bool zoreFill)
+	{
+		for (int i = 0; i < edges.size(); i++){
+			if (zoreFill){
+				edges[i].weight = 0;
+			}
+			else{
+				MapPoint sp = points[edges[i].sidx];
+				MapPoint ep = points[edges[i].eidx];
+				double wei = getDistance(sp.x, sp.y, ep.x, ep.y);
+				edges[i].weight = wei;
 			}
 		}
 	}
@@ -178,7 +231,7 @@ typedef struct _map_route_step{
 class MapRouter
 {
 public:
-	std::vector<MapRouteResult> routeMap(Maps map, int sidx, int eidx){
+	std::vector<MapRouteResult> routeMap(Maps map, int sidx, int eidx,bool useWeight,bool fullMin){
 		std::vector<MapRouteResult> ret;
 		if (sidx < 0 || eidx < 0){
 			return ret;
@@ -203,9 +256,6 @@ public:
 		int cp = 0;
 		while (true){
 			if (cp >= queue.size()){
-				MapRouteResult rs = { 0 };
-				rs.pass = false;
-				ret.push_back(rs);
 				break;
 			}
 			p = queue.at(cp);
@@ -231,28 +281,125 @@ public:
 				continue;
 			}
 			std::vector<int> nextRoutes = map.row(p.loc);
-			for (int i = 0; i<nextRoutes.size(); i += 1){
-				if (nextRoutes[i] == 1){
+
+			//使用权重（仅计算局部权重）
+			if (useWeight){
+				std::vector<int> minNextRoutes;
+				std::vector<double> minNextWeights;
+				//获取下一个可走点及下一步权重
+				for (int i = 0; i < nextRoutes.size(); i++){
+					if (nextRoutes[i] == 1){
+						minNextRoutes.push_back(i);
+						int qidx = map.findEdge(p.loc, i);
+						MapEdge pe = map.edges.at(qidx);
+						double pwei = pe.weight;
+						minNextWeights.push_back(pwei);
+					}
+				}
+				//按照权重最小进行排序
+				for (int i = 0; i < minNextRoutes.size(); i++){
+					bool swap = false;
+					for (int j = i; j < minNextRoutes.size() - 1; j++){
+						if (minNextWeights[j]>minNextWeights[j + 1]){
+							swap = true;
+							double tpw = minNextWeights[j];
+							minNextWeights[j] = minNextWeights[j + 1];
+							minNextWeights[j + 1] = tpw;
+
+							int tpi = minNextRoutes[j];
+							minNextRoutes[j] = minNextRoutes[j + 1];
+							minNextRoutes[j + 1] = tpi;
+						}
+					}
+					if (!swap){
+						break;
+					}
+				}
+				//进行寻路到下一步
+				RouteStep pp = p;
+				for (int i = 0; i < minNextRoutes.size(); i++){
+					int csp = minNextRoutes[i];
+					p = pp;
+					//判断是否已走过，防止循环
 					bool isSteped = false;
 					while (true){
 						if (p.pre == -1){
 							break;
 						}
 						p = queue.at(p.pre);
-						if (p.loc == i){
+						if (p.loc == csp){
 							isSteped = true;
 							break;
 						}
 					}
 					if (!isSteped){
 						RouteStep np;
-						np.loc = i;
+						np.loc = csp;
 						np.pre = cp;
 						queue.push_back(np);
 					}
 				}
 			}
+			else{
+				//不使用权重
+				RouteStep pp = p;
+				for (int i = 0; i < nextRoutes.size(); i += 1){
+					if (nextRoutes[i] == 1){
+						p = pp;
+						bool isSteped = false;
+						while (true){
+							if (p.pre == -1){
+								break;
+							}
+							p = queue.at(p.pre);
+							if (p.loc == i){
+								isSteped = true;
+								break;
+							}
+						}
+						if (!isSteped){
+							RouteStep np;
+							np.loc = i;
+							np.pre = cp;
+							queue.push_back(np);
+						}
+					}
+				}
+			}
 			cp++;
+		}
+		//全局最小
+		if (fullMin){
+			if (useWeight){
+				std::vector<double> fullWeight;
+				for (int i = 0; i < ret.size(); i++){
+					double swei = 0;
+					for (int j = 1; j < ret[i].routes.size(); j++){
+						int ei = map.findEdge(ret[i].routes[j - 1], ret[i].routes[j]);
+						double wei = map.edges[ei].weight;
+						swei += wei;
+					}
+					fullWeight.push_back(swei);
+				}
+				for (int i = 0; i < fullWeight.size(); i++){
+					bool swap = false;
+					for (int j = i; j < fullWeight.size() - 1; j++){
+						if (fullWeight[j]>fullWeight[j + 1]){
+							swap = true;
+							double tpw = fullWeight[j];
+							fullWeight[j] = fullWeight[j + 1];
+							fullWeight[j + 1] = tpw;
+
+							MapRouteResult tpi = ret[j];
+							ret[j] = ret[j + 1];
+							ret[j + 1] = tpi;
+						}
+					}
+					if (!swap){
+						break;
+					}
+				}
+			}
 		}
 		return ret;
 	}
@@ -280,13 +427,20 @@ private:
 	bool isShowBgImg;
 	bool isBlackPanel;
 
+	bool isEdgeDirectDbl;
+
+	bool isPointDistanceAsEdgeWeight;
+	bool isFullWeightPrior;
+
+	bool isShowWeight;
+
 	std::vector<MapRouteResult> routes;
 
 	void drawArrow(CDC * pDC,double x1, double y1, double x2, double y2);
 	void drawMapContent(CDC * pDC);
 
 	int findPointIdx(double x,double y, double radius);
-	double getDistance(double x1, double y1, double x2, double y2);
+	
 
 protected: // 仅从序列化创建
 	CMapRouterView();
@@ -346,6 +500,10 @@ public:
 	afx_msg void OnEditNone();
 	afx_msg void OnSwitchBgimgShow();
 	afx_msg void OnSwitchThemeColor();
+	afx_msg void OnSwitchEdgeDirectDbl();
+	afx_msg void OnSwitchPointDistanceAsWeight();
+	afx_msg void OnSwitchFullPriorWeight();
+	afx_msg void OnSwitchShowWeight();
 };
 
 #ifndef _DEBUG  // MapRouterView.cpp 中的调试版本

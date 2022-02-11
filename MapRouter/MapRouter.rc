@@ -124,6 +124,11 @@ BEGIN
         MENUITEM "编辑边(&L)",                     ID_EDIT_EDGE
         MENUITEM "编辑起始点(&S)",                   ID_EDIT_BEGIN_END_POINT
         MENUITEM SEPARATOR
+        MENUITEM "切换有向边/无向边(&E)",               ID_SWITCH_EDGE_DIRECT_DBL
+        MENUITEM SEPARATOR
+        MENUITEM "切换点距离作为边权重(&W)",              ID_SWITCH_POINT_DISTANCE_AS_WEIGHT
+        MENUITEM "切换全局最优权重(&F)",                ID_SWITCH_FULL_PRIOR_WEIGHT
+        MENUITEM SEPARATOR
         MENUITEM "开始寻路(&R)",                    ID_RUN_ROUTE
         MENUITEM SEPARATOR
         MENUITEM "仅显示最优",                       ID_DISPLAY_RESULT_ONE
@@ -137,6 +142,7 @@ BEGIN
     BEGIN
         MENUITEM "隐藏/显示背景(&B)",                 ID_SWITCH_BGIMG_SHOW
         MENUITEM "白昼/黑夜主题(&T)",                 ID_SWITCH_THEME_COLOR
+        MENUITEM "隐藏/显示权重(&W)",                 ID_SWITCH_SHOW_WEIGHT
     END
     POPUP "帮助(&H)"
     BEGIN
